@@ -1,0 +1,149 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: index
+  labels:
+    app: index
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: index
+  template:
+    metadata:
+      labels:
+        app: index
+    spec:
+      serviceAccountName: index
+      containers:
+        - name: index-script
+          image: zystem/index:latest
+          command: ["python", "/app/index.py"]
+          resources:
+            requests:
+              memory: "64Mi"
+              cpu: "100m"
+            limits:
+              memory: "64Mi"
+              cpu: "100m"
+          volumeMounts:
+            - name: data
+              mountPath: /data
+        - image: nginx:latest
+          name: nginx
+          resources:
+            requests:
+              memory: "64Mi"
+              cpu: "100m"
+            limits:
+              memory: "64Mi"
+              cpu: "100m"
+          ports:
+            - containerPort: 80
+              name: web
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 80
+            timeoutSeconds: 10
+          startupProbe:
+            exec:
+              command:
+              - cat
+              - /data/index.html
+            periodSeconds: 10
+            failureThreshold: 30
+          volumeMounts:
+            - name: nginx-config
+              mountPath: /etc/nginx/
+            - name: data
+              mountPath: /data
+      volumes:
+        - name: data
+          emptyDir:
+            medium: "Memory"
+            sizeLimit: 10Mi
+        - name: nginx-config
+          configMap:
+            name: nginx-config
+            items:
+              - key: nginx.conf
+                path: nginx.conf
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: nginx-config
+data:
+  nginx.conf: '
+events {
+}
+http {
+  server {
+    listen 80;
+    root /data;
+    location / {
+    }
+  }
+}
+'
+---
+apiVersion: v1
+kind: Service
+metadata:
+  annotations:
+  name: index
+spec:
+  ports:
+  - port: 80
+    protocol: TCP
+    targetPort: 80
+  selector:
+    app: index
+  type: ClusterIP
+
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  annotations:
+  name: index
+spec:
+  rules:
+  - host: index.local
+    http:
+      paths:
+      - backend:
+          service:
+            name: index
+            port:
+              number: 80
+        path: /
+        pathType: Prefix
+---
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: index
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: index
+rules:
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses"]
+    verbs: ["list"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: index
+subjects:
+  - kind: ServiceAccount
+    name: index
+    namespace: default
+roleRef:
+  kind: Role
+  name: index
+  apiGroup: rbac.authorization.k8s.io
